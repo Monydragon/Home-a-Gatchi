@@ -6,6 +6,9 @@ import { TimeWeatherSystem } from '@systems/TimeWeatherSystem';
 import { InventorySystem } from '@systems/InventorySystem';
 import { EquipmentSystem } from '@systems/EquipmentSystem';
 import { FishingSystem } from '@systems/FishingSystem';
+import { InteractionSystem } from '@systems/InteractionSystem';
+import { InventoryUI } from '@ui/InventoryUI';
+import { FishingMinigameUI } from '@ui/FishingMinigameUI';
 
 export class GameScene extends Phaser.Scene {
   private inputManager!: InputManager;
@@ -15,6 +18,9 @@ export class GameScene extends Phaser.Scene {
   private inventory!: InventorySystem;
   private equipment!: EquipmentSystem;
   private fishing!: FishingSystem;
+  private interactionSystem!: InteractionSystem;
+  private inventoryUI!: InventoryUI;
+  private fishingMinigameUI!: FishingMinigameUI;
   
   // Visual elements
   private clouds: Phaser.GameObjects.Image[] = [];
@@ -22,20 +28,27 @@ export class GameScene extends Phaser.Scene {
   private skyOverlay!: Phaser.GameObjects.Rectangle;
   private houseX: number = 0;
   private houseY: number = 0;
+  private houseSprite?: Phaser.GameObjects.Image;
   private pondX: number = 0;
   private pondY: number = 0;
   private flowers: Phaser.GameObjects.Image[] = [];
+  private trees: Phaser.GameObjects.Image[] = [];
+  
+  // Collision objects
+  private collisionObjects: Phaser.GameObjects.GameObject[] = [];
   
   // UI
   private equipmentKey?: Phaser.Input.Keyboard.Key;
   private fishingKey?: Phaser.Input.Keyboard.Key;
+  private inventoryKey?: Phaser.Input.Keyboard.Key;
 
   constructor() {
     super({ key: 'GameScene' });
   }
 
-  public init(): void {
-    console.log('GameScene init() called');
+  public init(data?: any): void {
+    console.log('GameScene init() called', data);
+    // If returning from house, restore player position if needed
   }
 
   public preload(): void {
@@ -75,6 +88,9 @@ export class GameScene extends Phaser.Scene {
       this.fishing = new FishingSystem(this.equipment, this.inventory);
       this.timeWeather = new TimeWeatherSystem();
       this.timeWeather.setTime(12, 0); // Start at noon
+      this.interactionSystem = new InteractionSystem(this);
+      this.inventoryUI = new InventoryUI(this, this.inventory);
+      this.fishingMinigameUI = new FishingMinigameUI(this);
       console.log('Game systems initialized');
       
       // Give player starting equipment
@@ -93,13 +109,21 @@ export class GameScene extends Phaser.Scene {
       this.player.setCustomization(this.equipment.getCustomization());
       console.log('Player created at', startX, startY);
       
-      // Create house
+      // Create house (larger)
       console.log('Creating house...');
       this.houseX = startX - 100;
       this.houseY = startY - 50;
-      const house = this.add.image(this.houseX, this.houseY, 'house');
-      house.setDepth(5);
-      house.setOrigin(0.5, 1);
+      this.houseSprite = this.add.image(this.houseX, this.houseY, 'house');
+      this.houseSprite.setDepth(4); // Object layer
+      this.houseSprite.setOrigin(0.5, 1);
+      
+      // Add physics body for collision (but allow door entry)
+      this.physics.add.existing(this.houseSprite, true);
+      const houseBody = this.houseSprite.body as Phaser.Physics.Arcade.Body;
+      // Make collision body smaller to allow door entry
+      houseBody.setSize(140, 100);
+      houseBody.setOffset(5, 0);
+      this.collisionObjects.push(this.houseSprite);
       
       // Create mailbox and driveway
       this.createMailboxAndDriveway();
@@ -109,7 +133,7 @@ export class GameScene extends Phaser.Scene {
       this.pondY = startY + 100;
       this.createPond();
       
-      // Create sky elements
+      // Create sky elements (textures are already created above)
       this.createSky();
       
       // Create trees
@@ -117,6 +141,12 @@ export class GameScene extends Phaser.Scene {
       
       // Create flowers
       this.createFlowers();
+      
+      // Setup collision detection (after all objects are created)
+      console.log('Setting up collision detection...');
+      // Collision will be set up after all objects are added to collisionObjects array
+      this.setupCollisions();
+      console.log('Collision detection setup complete');
       
       // Setup camera
       console.log('Setting up camera...');
@@ -127,11 +157,28 @@ export class GameScene extends Phaser.Scene {
       if (this.input.keyboard) {
         this.equipmentKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E);
         this.fishingKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F);
+        this.inventoryKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.I);
+        
+        // Inventory toggle - use 'down' event that can fire multiple times
+        this.inventoryKey.on('down', () => {
+          if (this.inventoryUI.isInventoryOpen()) {
+            this.inventoryUI.close();
+          } else {
+            this.inventoryUI.open();
+          }
+        });
         
         this.input.keyboard.on('keydown-ESC', () => {
-          this.scene.start('MainMenuScene');
+          if (this.inventoryUI.isInventoryOpen()) {
+            this.inventoryUI.close();
+          } else {
+            this.scene.start('MainMenuScene');
+          }
         });
       }
+      
+      // Setup interactions
+      this.setupInteractions();
       
       // HUD
       this.createHUD();
@@ -167,28 +214,32 @@ export class GameScene extends Phaser.Scene {
   private createHouseTexture(): void {
     if (this.textures.exists('house')) return;
     const graphics = this.add.graphics();
-    const houseWidth = 80;
-    const houseHeight = 60;
+    const houseWidth = 150; // Larger house
+    const houseHeight = 120;
     
+    // House body (yellow)
     graphics.fillStyle(0xFFD700, 1);
     graphics.fillRect(0, 0, houseWidth, houseHeight);
     
+    // House roof (darker yellow/brown)
     graphics.fillStyle(0xDAA520, 1);
     graphics.beginPath();
     graphics.moveTo(0, 0);
-    graphics.lineTo(houseWidth / 2, -30);
+    graphics.lineTo(houseWidth / 2, -50);
     graphics.lineTo(houseWidth, 0);
     graphics.closePath();
     graphics.fillPath();
     
+    // Door (brown)
     graphics.fillStyle(0x8B4513, 1);
-    graphics.fillRect(houseWidth / 2 - 12, houseHeight - 30, 24, 30);
+    graphics.fillRect(houseWidth / 2 - 20, houseHeight - 50, 40, 50);
     
+    // Windows (light blue)
     graphics.fillStyle(0x87CEEB, 1);
-    graphics.fillRect(houseWidth / 4 - 8, houseHeight / 2 - 8, 16, 16);
-    graphics.fillRect(houseWidth * 3 / 4 - 8, houseHeight / 2 - 8, 16, 16);
+    graphics.fillRect(houseWidth / 4 - 12, houseHeight / 2 - 12, 24, 24);
+    graphics.fillRect(houseWidth * 3 / 4 - 12, houseHeight / 2 - 12, 24, 24);
     
-    graphics.generateTexture('house', houseWidth, houseHeight + 30);
+    graphics.generateTexture('house', houseWidth, houseHeight + 50);
     graphics.destroy();
   }
 
@@ -291,18 +342,31 @@ export class GameScene extends Phaser.Scene {
       const worldWidth = GameConfig.WORLD_WIDTH * GameConfig.TILE_SIZE;
       const worldHeight = GameConfig.WORLD_HEIGHT * GameConfig.TILE_SIZE;
       
-      // Sun
+      // Sun - stationary with ground (depth 2 for overhead layer)
       if (this.textures.exists('sun')) {
-        this.sun = this.add.image(worldWidth * 0.8, 100, 'sun');
-        this.sun.setDepth(1);
-        this.sun.setScrollFactor(0.1); // Parallax effect
+        this.sun = this.add.image(worldWidth * 0.5, 100, 'sun');
+        this.sun.setDepth(2); // Overhead layer
+        this.sun.setScrollFactor(1); // Stationary with ground
         this.sun.setActive(true);
         this.sun.setVisible(true);
+        this.sun.setAlpha(1);
+        console.log('Sun created at:', this.sun.x, this.sun.y, 'visible:', this.sun.visible, 'active:', this.sun.active, 'depth:', this.sun.depth);
       } else {
-        console.error('Sun texture does not exist!');
+        console.error('Sun texture does not exist! Creating it now...');
+        // Create sun texture if it doesn't exist
+        this.createSkyTextures();
+        if (this.textures.exists('sun')) {
+          this.sun = this.add.image(worldWidth * 0.5, 100, 'sun');
+          this.sun.setDepth(2); // Overhead layer
+          this.sun.setScrollFactor(1);
+          this.sun.setActive(true);
+          this.sun.setVisible(true);
+          this.sun.setAlpha(1);
+          console.log('Sun created after texture generation');
+        }
       }
       
-      // Clouds
+      // Clouds - stationary with ground (depth 2 for overhead layer)
       if (this.textures.exists('cloud')) {
         for (let i = 0; i < 5; i++) {
           const cloud = this.add.image(
@@ -310,8 +374,8 @@ export class GameScene extends Phaser.Scene {
             Phaser.Math.Between(50, 200),
             'cloud'
           );
-          cloud.setDepth(1);
-          cloud.setScrollFactor(0.05);
+          cloud.setDepth(2); // Overhead layer
+          cloud.setScrollFactor(1); // Stationary with ground
           cloud.setActive(true);
           cloud.setVisible(true);
           this.clouds.push(cloud);
@@ -329,7 +393,7 @@ export class GameScene extends Phaser.Scene {
         0x000000,
         0
       );
-      this.skyOverlay.setDepth(200);
+      this.skyOverlay.setDepth(199); // Overlay layer (below UI)
       this.skyOverlay.setScrollFactor(0);
       this.skyOverlay.setOrigin(0.5, 0.5);
       this.skyOverlay.setActive(true);
@@ -344,8 +408,15 @@ export class GameScene extends Phaser.Scene {
     const mailboxX = this.houseX - 60;
     const mailboxY = this.houseY - 10;
     const mailbox = this.add.image(mailboxX, mailboxY, 'mailbox');
-    mailbox.setDepth(6);
+    mailbox.setDepth(4); // Object layer
     mailbox.setOrigin(0.5, 1);
+    mailbox.setName('mailbox');
+    
+    // Add collision for mailbox
+    this.physics.add.existing(mailbox, true);
+    const mailboxBody = mailbox.body as Phaser.Physics.Arcade.Body;
+    mailboxBody.setSize(20, 30);
+    this.collisionObjects.push(mailbox);
     
     // Curved driveway using line segments to approximate a curve
     const graphics = this.add.graphics();
@@ -371,12 +442,12 @@ export class GameScene extends Phaser.Scene {
     }
     
     graphics.strokePath();
-    graphics.setDepth(4);
+    graphics.setDepth(1); // Ground Detail layer (driveway)
   }
 
   private createPond(): void {
     const pond = this.add.image(this.pondX, this.pondY, 'pond');
-    pond.setDepth(4);
+    pond.setDepth(3); // Object layer
     pond.setOrigin(0.5, 0.5);
     pond.setInteractive({ useHandCursor: true });
     pond.on('pointerdown', () => {
@@ -384,6 +455,13 @@ export class GameScene extends Phaser.Scene {
         this.fishing.startFishing();
       }
     });
+    
+    // Add collision for pond (player can't walk through water)
+    this.physics.add.existing(pond, true);
+    const pondBody = pond.body as Phaser.Physics.Arcade.Body;
+    pondBody.setSize(70, 70);
+    pondBody.setOffset(5, 5);
+    this.collisionObjects.push(pond);
   }
 
   private createFlowers(): void {
@@ -401,7 +479,7 @@ export class GameScene extends Phaser.Scene {
       if (distToHouse > 100 && distToPond > 60) {
         const flowerType = Phaser.Math.Between(0, 5);
         const flower = this.add.image(flowerX, flowerY, `flower${flowerType}`);
-        flower.setDepth(2);
+        flower.setDepth(1); // Ground Detail layer
         flower.setOrigin(0.5, 1);
         this.flowers.push(flower);
       }
@@ -420,15 +498,23 @@ export class GameScene extends Phaser.Scene {
       const startY = (GameConfig.WORLD_HEIGHT * GameConfig.TILE_SIZE) / 2;
       const distance = Phaser.Math.Distance.Between(treeX, treeY, startX, startY);
       
-      if (distance < 150) {
+      if (distance < 200) {
         const angle = Phaser.Math.Angle.Between(startX, startY, treeX, treeY);
-        treeX = startX + Math.cos(angle) * 200;
-        treeY = startY + Math.sin(angle) * 200;
+        treeX = startX + Math.cos(angle) * 250;
+        treeY = startY + Math.sin(angle) * 250;
       }
       
       const tree = this.add.image(treeX, treeY, 'tree');
-      tree.setDepth(3);
+      tree.setDepth(4); // Object layer
       tree.setOrigin(0.5, 1);
+      
+      // Add physics body for collision
+      this.physics.add.existing(tree, true);
+      const treeBody = tree.body as Phaser.Physics.Arcade.Body;
+      treeBody.setSize(30, 40);
+      treeBody.setOffset(5, 10);
+      this.collisionObjects.push(tree);
+      this.trees.push(tree);
     }
   }
 
@@ -454,8 +540,8 @@ export class GameScene extends Phaser.Scene {
     });
     this.weatherText.setScrollFactor(0).setDepth(100);
     
-    // Equipment button hint
-    this.add.text(10, 60, 'E: Equipment | F: Fish (at pond)', {
+    // Controls hint
+    this.add.text(10, 60, 'I: Inventory | E: Interact | F: Fish', {
       fontSize: '12px',
       color: '#ffffff',
       backgroundColor: '#000000',
@@ -465,6 +551,12 @@ export class GameScene extends Phaser.Scene {
 
   public update(time: number, delta: number): void {
     try {
+      // Update inventory navigation if open
+      if (this.inventoryUI.isInventoryOpen()) {
+        this.inventoryUI.updateNavigation();
+        return; // Don't update game systems when inventory is open
+      }
+      
       // Update systems
       if (this.timeWeather) {
         this.timeWeather.update(delta);
@@ -478,26 +570,28 @@ export class GameScene extends Phaser.Scene {
       // Update player - CRITICAL: This must run for player to move
       if (this.player) {
         this.player.update(time, delta);
+        
+        // Update interaction system (only if inventory and fishing minigame are closed)
+        if (this.interactionSystem && !this.inventoryUI.isInventoryOpen() && !this.fishingMinigameUI.isMinigameActive()) {
+          const playerPos = this.player.getPosition();
+          this.interactionSystem.update(playerPos.x, playerPos.y);
+        }
       }
       
-      // Update clouds
-      if (this.clouds && this.clouds.length > 0) {
-        this.clouds.forEach(cloud => {
-          if (cloud && cloud.active) {
-            cloud.x += 0.05;
-            if (cloud.x > GameConfig.WORLD_WIDTH * GameConfig.TILE_SIZE + 50) {
-              cloud.x = -50;
-            }
-          }
-        });
-      }
-      
-      // Update sun position based on time
+      // Update sun position based on time (stationary with ground)
       if (this.sun && this.sun.active && this.timeWeather) {
         const timeProgress = this.timeWeather.getTimeProgress();
         const worldWidth = GameConfig.WORLD_WIDTH * GameConfig.TILE_SIZE;
-        this.sun.x = worldWidth * 0.2 + (worldWidth * 0.6 * timeProgress);
-        this.sun.y = 100 + Math.sin(timeProgress * Math.PI) * 150;
+        // Sun moves across the sky but stays with world scroll
+        const sunX = worldWidth * 0.2 + (worldWidth * 0.6 * timeProgress);
+        const sunY = 100 + Math.sin(timeProgress * Math.PI) * 150;
+        // Update sun position
+        this.sun.x = sunX;
+        this.sun.y = sunY;
+        // Ensure sun is visible
+        if (!this.sun.visible) {
+          this.sun.setVisible(true);
+        }
       }
       
       // Update sky overlay for day/night
@@ -506,11 +600,22 @@ export class GameScene extends Phaser.Scene {
         this.skyOverlay.setAlpha(1 - lightLevel);
       }
       
-      // Update fishing
-      if (this.fishing && this.fishing.isCurrentlyFishing()) {
-        const result = this.fishing.updateFishing(delta);
-        if (result.caught) {
-          console.log(`Caught a ${result.fish?.name}!`);
+      // Update fishing minigame
+      if (this.fishingMinigameUI.isMinigameActive()) {
+        const result = this.fishingMinigameUI.update(delta);
+        if (result.finished) {
+          if (result.success) {
+            // Success - catch the fish
+            const fishingResult = this.fishing.updateFishing(5000); // Simulate successful catch
+            if (fishingResult.caught) {
+              console.log(`Caught a ${fishingResult.fish?.name}!`);
+              this.inventoryUI.refresh();
+            }
+          } else {
+            // Failed - lose the attempt
+            this.fishing.stopFishing();
+            console.log('Fish got away!');
+          }
         }
       }
       
@@ -532,17 +637,75 @@ export class GameScene extends Phaser.Scene {
         console.log('Equipment menu (to be implemented)');
       }
       
-      // Fishing key
-      if (this.fishingKey?.isDown && this.player && this.fishing) {
-        const playerPos = this.player.getPosition();
-        const distToPond = Phaser.Math.Distance.Between(playerPos.x, playerPos.y, this.pondX, this.pondY);
-        if (distToPond < 100 && this.fishing.canFish() && !this.fishing.isCurrentlyFishing()) {
-          this.fishing.startFishing();
+      // Controller support for inventory (Y button on Xbox controller)
+      if (this.input.gamepad?.gamepads && this.input.gamepad.gamepads.length > 0) {
+        const pad = this.input.gamepad.gamepads[0];
+        if (pad.Y && pad.Y.isDown) {
+          if (!this.inventoryUI.isInventoryOpen()) {
+            this.inventoryUI.open();
+          }
         }
       }
       
     } catch (error) {
       console.error('Error in GameScene update():', error);
     }
+  }
+
+  private setupCollisions(): void {
+    // Setup collision for all collision objects
+    this.collisionObjects.forEach(obj => {
+      if (obj && obj.body) {
+        this.physics.add.collider(this.player.sprite, obj);
+      }
+    });
+  }
+
+  private setupInteractions(): void {
+    // House entry interaction
+    if (this.houseSprite) {
+      this.interactionSystem.registerInteraction({
+        id: 'house-entry',
+        x: this.houseX,
+        y: this.houseY - 20,
+        radius: 80,
+        label: 'enter house',
+        action: () => {
+          this.enterHouse();
+        },
+        key: 'E',
+      });
+    }
+    
+    // Pond fishing interaction
+    this.interactionSystem.registerInteraction({
+      id: 'pond-fishing',
+      x: this.pondX,
+      y: this.pondY,
+      radius: 100,
+      label: 'fish',
+      action: () => {
+        if (this.fishing.canFish() && !this.fishing.isCurrentlyFishing() && !this.fishingMinigameUI.isMinigameActive()) {
+          this.fishing.startFishing();
+          this.fishingMinigameUI.start();
+        }
+      },
+      key: 'F',
+    });
+  }
+
+  private enterHouse(): void {
+    console.log('Entering house...');
+    // Store player position for when returning
+    const playerPos = this.player.getPosition();
+    
+    // Pass player data to interior scene
+    this.scene.launch('HouseInteriorScene', {
+      player: this.player,
+      equipment: this.equipment,
+      inventory: this.inventory,
+      returnPosition: playerPos,
+    });
+    this.scene.pause('GameScene');
   }
 }

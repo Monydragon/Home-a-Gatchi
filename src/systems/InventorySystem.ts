@@ -55,6 +55,16 @@ export class InventorySystem {
     return Array.from(this.items.values());
   }
 
+  public getItems(): Item[] {
+    // Return items as array for UI display (up to 27 slots for 9x3 grid)
+    const items = Array.from(this.items.values());
+    const result: Item[] = [];
+    for (let i = 0; i < 27; i++) {
+      result.push(items[i] || { id: '', name: '', type: 'other', value: 0, quantity: 0 });
+    }
+    return result;
+  }
+
   public hasItem(itemId: string, quantity: number = 1): boolean {
     const item = this.items.get(itemId);
     return item ? item.quantity >= quantity : false;

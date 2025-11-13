@@ -74,18 +74,93 @@ export class TileMap {
     this.tileset = this.tilemap.addTilesetImage('combinedTiles', 'combinedTiles', GameConfig.TILE_SIZE, GameConfig.TILE_SIZE, 0, 0, 0, 1, 3);
 
     // Create ground layer with procedural generation
+    // Use seeded random for consistent but varied generation
+    const seed = Math.random() * 1000;
     const groundData: number[][] = [];
+    
+    // Generate road network (main paths)
+    const roadMap: boolean[][] = [];
+    for (let y = 0; y < this.worldHeight; y++) {
+      roadMap[y] = [];
+      for (let x = 0; x < this.worldWidth; x++) {
+        roadMap[y][x] = false;
+      }
+    }
+    
+    // Create main roads (horizontal and vertical)
+    const numMainRoads = 3 + Math.floor(Math.random() * 3); // 3-5 main roads
+    for (let i = 0; i < numMainRoads; i++) {
+      const isHorizontal = Math.random() > 0.5;
+      const pos = Math.floor(Math.random() * (isHorizontal ? this.worldHeight : this.worldWidth));
+      
+      if (isHorizontal) {
+        for (let x = 0; x < this.worldWidth; x++) {
+          // Road width of 2-3 tiles
+          for (let offset = -1; offset <= 1; offset++) {
+            if (pos + offset >= 0 && pos + offset < this.worldHeight) {
+              roadMap[pos + offset][x] = true;
+            }
+          }
+        }
+      } else {
+        for (let y = 0; y < this.worldHeight; y++) {
+          for (let offset = -1; offset <= 1; offset++) {
+            if (pos + offset >= 0 && pos + offset < this.worldWidth) {
+              roadMap[y][pos + offset] = true;
+            }
+          }
+        }
+      }
+    }
+    
+    // Create connecting paths
+    const numConnections = 5 + Math.floor(Math.random() * 5);
+    for (let i = 0; i < numConnections; i++) {
+      const startX = Math.floor(Math.random() * this.worldWidth);
+      const startY = Math.floor(Math.random() * this.worldHeight);
+      const endX = Math.floor(Math.random() * this.worldWidth);
+      const endY = Math.floor(Math.random() * this.worldHeight);
+      
+      // Simple pathfinding - draw line between points
+      const steps = Math.max(Math.abs(endX - startX), Math.abs(endY - startY));
+      for (let step = 0; step <= steps; step++) {
+        const t = steps > 0 ? step / steps : 0;
+        const x = Math.floor(startX + (endX - startX) * t);
+        const y = Math.floor(startY + (endY - startY) * t);
+        
+        if (x >= 0 && x < this.worldWidth && y >= 0 && y < this.worldHeight) {
+          roadMap[y][x] = true;
+          // Add width to path
+          for (let offset = -1; offset <= 1; offset++) {
+            if (x + offset >= 0 && x + offset < this.worldWidth) {
+              roadMap[y][x + offset] = true;
+            }
+            if (y + offset >= 0 && y + offset < this.worldHeight) {
+              roadMap[y + offset][x] = true;
+            }
+          }
+        }
+      }
+    }
+    
+    // Generate terrain with varied grass
     for (let y = 0; y < this.worldHeight; y++) {
       groundData[y] = [];
       for (let x = 0; x < this.worldWidth; x++) {
-        // Create a simple pattern with paths
-        const noise = (x * 0.1 + y * 0.1) % 1;
-        if (x % 5 === 0 || y % 5 === 0) {
-          groundData[y][x] = 2; // Path
-        } else if (noise > 0.7) {
-          groundData[y][x] = 1; // Dark grass
+        if (roadMap[y][x]) {
+          groundData[y][x] = 2; // Path/Road
         } else {
-          groundData[y][x] = 0; // Light grass
+          // Use Perlin-like noise for grass variation
+          const noiseX = (x + seed) * 0.1;
+          const noiseY = (y + seed) * 0.1;
+          const noise = (Math.sin(noiseX) * Math.cos(noiseY) + 1) / 2; // 0-1 range
+          
+          // More varied grass patterns
+          if (noise > 0.65) {
+            groundData[y][x] = 1; // Dark grass
+          } else {
+            groundData[y][x] = 0; // Light grass
+          }
         }
       }
     }
@@ -103,7 +178,7 @@ export class TileMap {
           this.groundLayer.putTileAt(globalTileIndex, x, y);
         }
       }
-      this.groundLayer.setDepth(0);
+      this.groundLayer.setDepth(0); // Ground layer
     }
 
     // Create collision layer (empty for now, can be populated later)

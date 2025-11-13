@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { GameScene } from '@scenes/GameScene';
 import { MainMenuScene } from '@scenes/MainMenuScene';
+import { HouseInteriorScene } from '@scenes/HouseInteriorScene';
 import { GameConfig } from '@config/gameConfig';
 
 const config: Phaser.Types.Core.GameConfig = {
@@ -16,7 +17,7 @@ const config: Phaser.Types.Core.GameConfig = {
       debug: false,
     },
   },
-  scene: [MainMenuScene, GameScene],
+  scene: [MainMenuScene, GameScene, HouseInteriorScene],
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,

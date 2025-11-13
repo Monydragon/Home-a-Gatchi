@@ -9,6 +9,10 @@ export class Player extends BaseEntity {
   private body?: Phaser.Physics.Arcade.Body;
   private customization: CharacterCustomization;
   private hatSprite?: Phaser.GameObjects.Sprite;
+  private shirtSprite?: Phaser.GameObjects.Sprite;
+  private pantsSprite?: Phaser.GameObjects.Sprite;
+  private shoesSprite?: Phaser.GameObjects.Sprite;
+  private accessorySprite?: Phaser.GameObjects.Sprite;
 
   constructor(scene: Phaser.Scene, x: number, y: number, inputManager: InputManager) {
     // Create a simple colored rectangle as placeholder sprite
@@ -31,13 +35,14 @@ export class Player extends BaseEntity {
     // Enable physics
     scene.physics.add.existing(this.sprite);
     this.body = this.sprite.body as Phaser.Physics.Arcade.Body;
-    this.body.setCollideWorldBounds(true);
+    // Don't collide with world bounds - allow free movement throughout map
+    this.body.setCollideWorldBounds(false);
     this.body.setSize(24, 24);
     this.body.setOffset(4, 4);
     this.body.setImmovable(false);
     
-    // Set depth so player appears above house and trees
-    this.sprite.setDepth(10);
+    // Set depth so player appears above objects but below overhead
+    this.sprite.setDepth(5); // Above objects
     
     // Create hat sprite
     this.createHatSprite();
@@ -65,7 +70,7 @@ export class Player extends BaseEntity {
     }
     
     this.hatSprite = this.scene.add.sprite(this.x, this.y - 8, 'blueHat');
-    this.hatSprite.setDepth(11); // Above player
+    this.hatSprite.setDepth(6); // Above player but below overhead
     this.hatSprite.setOrigin(0.5, 0.5);
     // Hat is visible by default since player starts with it equipped
     this.customization.hat = 'blueHat';
@@ -102,7 +107,17 @@ export class Player extends BaseEntity {
     // Update hat visibility
     if (this.hatSprite) {
       this.hatSprite.setVisible(this.customization.hat !== null);
+      if (this.customization.hat && this.customization.hat.startsWith('color_')) {
+        const color = parseInt(this.customization.hat.replace('color_', ''), 16);
+        this.hatSprite.setTint(color);
+      } else {
+        this.hatSprite.clearTint();
+      }
     }
+    
+    // Update other customization items (shirt, pants, shoes, accessory)
+    // For now, we'll just update colors if sprites exist
+    // In a full implementation, you'd create sprites for each item
   }
 
   public getCustomization(): CharacterCustomization {
